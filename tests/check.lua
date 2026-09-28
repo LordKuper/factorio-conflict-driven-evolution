@@ -35,4 +35,41 @@ local research_change, research_parts = evolution.change(capped_before, raised_c
 assert(math.abs(research_change - 0.1) < 1e-12)
 assert(math.abs(research_parts.cap - research_change) < 1e-12)
 
+local items = {
+  ["modded-turret"] = {type="item", place_result={attack_parameters={}}},
+  ["modded-ammo"] = {type="ammo"},
+  ["utility-capsule"] = {type="capsule", capsule_action={type="use-on-self"}}
+}
+local recipes = {
+  ["modded-defense"] = {products={{type="item", name="modded-turret"}}},
+  ["modded-ammunition"] = {products={{type="item", name="modded-ammo"}}},
+  ["utility"] = {products={{type="item", name="utility-capsule"}}}
+}
+assert(evolution.is_combat_technology({effects={{type="ammo-damage"}}}, recipes, items))
+assert(evolution.is_combat_technology({effects={{type="unlock-recipe", recipe="modded-defense"}}}, recipes, items))
+assert(evolution.is_combat_technology({effects={{type="unlock-recipe", recipe="modded-ammunition"}}}, recipes, items))
+assert(not evolution.is_combat_technology({effects={{type="unlock-recipe", recipe="utility"}}}, recipes, items))
+
+local technologies = {
+  {name="ordinary-1", enabled=true, researched=true, prototype={max_level=0, effects={}}},
+  {name="ordinary-2", enabled=true, researched=false, prototype={max_level=0, effects={}}},
+  {name="modded-defense-tech", enabled=true, researched=true,
+    prototype={max_level=0, effects={{type="unlock-recipe", recipe="modded-defense"}}}},
+  {name="hidden-combat", enabled=true, researched=false,
+    prototype={hidden=true, max_level=0, effects={{type="ammo-damage"}}}},
+  {name="infinite-combat", enabled=true, researched=false,
+    prototype={max_level=4294967295, effects={{type="ammo-damage"}}}},
+  {name="disabled-combat", enabled=false, researched=false,
+    prototype={max_level=0, effects={{type="ammo-damage"}}}}
+}
+assert(math.abs(evolution.technology_cap(technologies, recipes, items, {}) - 0.9216) < 1e-12)
+technologies[1].researched = false
+technologies[3].researched = false
+assert(evolution.technology_cap(technologies, recipes, items, {}) == 0)
+technologies[1].researched = true
+technologies[2].researched = true
+technologies[3].researched = true
+assert(evolution.technology_cap(technologies, recipes, items, {}) == 1)
+assert(evolution.technology_cap({}, recipes, items, {}) == 1)
+
 return true

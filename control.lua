@@ -44,17 +44,11 @@ local function pct(name)
   return settings.global[name].value / 100
 end
 
+local combat_technology_weights = {}
 local function technology_cap()
   if not settings.global["cde-tech-cap-enabled"].value then return 1 end
-  local researched, total = 0, 0
-  for _, technology in pairs(game.forces.player.technologies) do
-    if technology.enabled and not technology.prototype.hidden
-      and technology.prototype.max_level ~= 4294967295 then
-      total = total + 1
-      if technology.researched then researched = researched + 1 end
-    end
-  end
-  return total > 0 and researched / total or 1
+  return evolution.technology_cap(game.forces.player.technologies,
+    prototypes.recipe, prototypes.item, combat_technology_weights)
 end
 
 
@@ -128,7 +122,13 @@ local function recalc(surface)
   local cap = technology_cap()
   local value = math.min(uncapped, cap)
   enemy.set_evolution_factor(value, surface)
-  state.snapshot = {factors = factors, pressure = pressure, uncapped = uncapped, cap = cap, value = value}
+  state.snapshot = nil
+  for _, player in pairs(game.connected_players) do
+    if player.surface.index == surface.index and player.mod_settings["cde-session-report-mode"].value ~= "off" then
+      state.snapshot = {factors = factors, pressure = pressure, uncapped = uncapped, cap = cap, value = value}
+      break
+    end
+  end
 end
 
 local function recalc_all()
@@ -136,11 +136,15 @@ local function recalc_all()
 end
 
 local function reset_session(player)
-  if player.surface.platform then return end
+  storage.cde.sessions = storage.cde.sessions or {}
+  if player.surface.platform or player.mod_settings["cde-session-report-mode"].value == "off" then
+    storage.cde.sessions[player.index] = nil
+    if not player.surface.platform then recalc(player.surface) end
+    return
+  end
   recalc(player.surface)
   local snapshot = get_state(player.surface.index).snapshot
   if not snapshot then return end
-  storage.cde.sessions = storage.cde.sessions or {}
   storage.cde.sessions[player.index] = {
     surface_index = player.surface.index,
     baseline = snapshot,
@@ -148,40 +152,47 @@ local function reset_session(player)
   }
 end
 
-local function report_values(player)
-  if player.surface.platform or not player.mod_settings["cde-show-session-evolution"].value then return end
-  local snapshot = get_state(player.surface.index).snapshot
-  if not snapshot then return end
-  storage.cde.sessions = storage.cde.sessions or {}
+local function report_values(player, mode)
+  if player.surface.platform or player.mod_settings["cde-session-report-mode"].value ~= mode then return end
   local session = storage.cde.sessions[player.index]
   if not session or session.surface_index ~= player.surface.index then
     reset_session(player)
     session = storage.cde.sessions[player.index]
   end
   if not session then return end
+  local snapshot = get_state(player.surface.index).snapshot
+  if not snapshot then return end
 
   local change, parts = evolution.change(session.baseline, snapshot)
-  local function points(value) return string.format("%+.4f", value * 100) end
+  local point_format = mode == "stats-gui" and "%+.1f" or "%+.4f"
+  local value_format = mode == "stats-gui" and "%.1f" or "%.4f"
+  local cap_format = mode == "stats-gui" and "%.1f" or "%.2f"
+  local function points(value) return string.format(point_format, value * 100) end
   return {
-    string.format("%.4f", snapshot.value * 100), points(change),
+    string.format(value_format, snapshot.value * 100), points(change),
     points(parts.time), points(parts.pollution), points(parts.trees),
     points(parts.units), points(parts.spawners), points(parts.worms),
     points(parts.expansion), points(parts.cap),
-    string.format("%.2f", snapshot.cap * 100)
+    string.format(cap_format, snapshot.cap * 100)
   }
 end
 
 local function stats_gui_sensor(player)
-  local values = report_values(player)
-  if values then return {"cde-report.stats", table.unpack(values)} end
+  local values = report_values(player, "stats-gui")
+  if not values then return end
+  local caption = {"cde-report.stats", table.unpack(values, 1, 9)}
+  if settings.global["cde-tech-cap-enabled"].value then
+    caption[1] = "cde-report.stats-capped"
+    caption[11] = values[11]
+  end
+  return {"", caption}
 end
 
 remote.add_interface("ConflictDrivenEvolution", {session_evolution = stats_gui_sensor})
 
 local stats_gui_available = false
 local function register_stats_gui()
-  local interface = remote.interfaces["StatsGui"]
-  if script.active_mods["StatsGui"] and interface and interface.version and interface.add_sensor
+  if not stats_gui_available and script.active_mods["StatsGui"]
     and remote.call("StatsGui", "version") == 1 then
     remote.call("StatsGui", "add_sensor", "ConflictDrivenEvolution", "session_evolution")
     stats_gui_available = true
@@ -214,6 +225,7 @@ end
 
 local function initialize()
   storage.cde = storage.cde or {surfaces = {}}
+  storage.cde.sessions = {}
   initialize_existing_chunks()
   for _, surface in pairs(game.surfaces) do
     baseline_tree_absorption(surface)
@@ -222,20 +234,32 @@ local function initialize()
   for _, player in pairs(game.connected_players) do reset_session(player) end
 end
 
+local function migrate_report_setting()
+  for _, player in pairs(game.players) do
+    if player.mod_settings["cde-show-session-evolution"].value then
+      player.mod_settings["cde-session-report-mode"] = {
+        value = script.active_mods["StatsGui"] and "stats-gui" or "chat"
+      }
+      player.mod_settings["cde-show-session-evolution"] = {value = false}
+    end
+  end
+end
+
 script.on_init(function()
   initialize()
   register_stats_gui()
 end)
 script.on_load(register_stats_gui)
 script.on_configuration_changed(function()
+  migrate_report_setting()
   initialize()
   if not stats_gui_available then register_stats_gui() end
 end)
 
 script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)
-  if event.setting == "cde-show-session-evolution" then
-    local session = storage.cde and storage.cde.sessions and storage.cde.sessions[event.player_index]
-    if session then session.last_report_tick = game.tick end
+  if event.setting == "cde-session-report-mode" then
+    local player = game.get_player(event.player_index)
+    if player then reset_session(player) end
   elseif string.sub(event.setting, 1, 4) == "cde-" then
     recalc_all()
   end
@@ -254,13 +278,15 @@ script.on_nth_tick(600, function()
     sample_tree_absorption(surface)
     recalc(surface)
   end
-  if not stats_gui_available then
-    for _, player in pairs(game.connected_players) do
-      local values = report_values(player)
+  for _, player in pairs(game.connected_players) do
+    if player.mod_settings["cde-session-report-mode"].value == "chat" then
       local session = storage.cde.sessions and storage.cde.sessions[player.index]
-      if values and session and game.tick - session.last_report_tick >= 36000 then
-        player.print(chat_report(values))
-        session.last_report_tick = game.tick
+      if session and game.tick - session.last_report_tick >= 36000 then
+        local values = report_values(player, "chat")
+        if values then
+          player.print(chat_report(values))
+          session.last_report_tick = game.tick
+        end
       end
     end
   end
@@ -274,6 +300,10 @@ end)
 script.on_event(defines.events.on_player_changed_surface, function(event)
   local player = game.get_player(event.player_index)
   if player then reset_session(player) end
+end)
+
+script.on_event(defines.events.on_player_left_game, function(event)
+  if storage.cde and storage.cde.sessions then storage.cde.sessions[event.player_index] = nil end
 end)
 
 script.on_event(defines.events.on_player_removed, function(event)

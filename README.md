@@ -12,9 +12,10 @@ but clearing their bases can reduce it.
 ## Optional features
 
 - **Technology cap:** Keeps enemy evolution in step with your research progress.
-- **Session report:** Shows how each factor has changed evolution since you
-  joined. The breakdown appears in Stats GUI if you have it installed, or
-  periodically in chat otherwise.
+  Combat research raises the limit more than other research.
+- **Session report:** When enabled, shows how each factor has changed evolution
+  since you joined. Choose periodic chat messages or a compact Stats GUI display
+  if you have that mod installed. Turn it off to stop collecting session data.
 
 Made for Factorio 2.0 and Space Age. Avoid combining it with another mod that
 changes enemy evolution.

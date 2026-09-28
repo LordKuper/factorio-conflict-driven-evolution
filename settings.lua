@@ -8,5 +8,8 @@ data:extend({
   {type="bool-setting", name="cde-expansion-enabled", setting_type="runtime-global", default_value=true, order="c-a"},
   {type="double-setting", name="cde-expansion-per-chunk", setting_type="runtime-global", minimum_value=0, maximum_value=10, default_value=0.05, order="c-b"},
   {type="bool-setting", name="cde-tech-cap-enabled", setting_type="runtime-global", default_value=false, order="d-a"},
-  {type="bool-setting", name="cde-show-session-evolution", setting_type="runtime-per-user", default_value=false, order="e-a"}
+  {type="bool-setting", name="cde-show-session-evolution", setting_type="runtime-per-user", default_value=false, hidden=true, order="e-a"},
+  {type="string-setting", name="cde-session-report-mode", setting_type="runtime-per-user",
+    allowed_values=mods["StatsGui"] and {"off", "chat", "stats-gui"} or {"off", "chat"},
+    default_value="off", order="e-b"}
 })
